@@ -10,9 +10,7 @@ KBNSLS_LOG="$LOG_DIR/kbnsls.log"
 KBNSTACK_LOG="$LOG_DIR/kbnstack.log"
 OPTIMIZER_LOG="$LOG_DIR/optimizer.log"
 rm -f "$ESSLS_LOG" "$ESSTACK_LOG" "$KBNSLS_LOG" "$KBNSTACK_LOG" "$OPTIMIZER_LOG"
-# Create each log file and add "hello world" to the top
 touch "$ESSLS_LOG" "$ESSTACK_LOG" "$KBNSLS_LOG" "$KBNSTACK_LOG" "$OPTIMIZER_LOG"
-echo "hello world" | tee -a "$ESSLS_LOG" "$ESSTACK_LOG" "$KBNSLS_LOG" "$KBNSTACK_LOG" "$OPTIMIZER_LOG"
 log_step() {
   local msg="$1"
   local logfile="$2"
