@@ -1,0 +1,280 @@
+#!/bin/bash
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+set -e
+LOG_DIR=~/workplace/local_dev_logs
+mkdir -p "$LOG_DIR"
+ESSLS_LOG="$LOG_DIR/essls.log"
+ESSTACK_LOG="$LOG_DIR/esstack.log"
+KBNSLS_LOG="$LOG_DIR/kbnsls.log"
+KBNSTACK_LOG="$LOG_DIR/kbnstack.log"
+OPTIMIZER_LOG="$LOG_DIR/optimizer.log"
+rm -f "$ESSLS_LOG" "$ESSTACK_LOG" "$KBNSLS_LOG" "$KBNSTACK_LOG" "$OPTIMIZER_LOG"
+# Create each log file and add "hello world" to the top
+touch "$ESSLS_LOG" "$ESSTACK_LOG" "$KBNSLS_LOG" "$KBNSTACK_LOG" "$OPTIMIZER_LOG"
+echo "hello world" | tee -a "$ESSLS_LOG" "$ESSTACK_LOG" "$KBNSLS_LOG" "$KBNSTACK_LOG" "$OPTIMIZER_LOG"
+log_step() {
+  local msg="$1"
+  local logfile="$2"
+  local ts
+  ts=$(date '+%Y-%m-%d %H:%M:%S')
+  echo -e "\n[$ts] $msg" | tee -a "$logfile"
+}
+log_step "Clearing processes" "$LOG_DIR/stack.log"
+# kill processes listening on 9200, 9201, 9300, 9301, 5601, 5611
+for port in 9200 9201 9300 9301 5601 5611; do
+  pid=$(lsof -ti tcp:$port)
+  if [ -n "$pid" ]; then
+    echo "Killing process $pid on port $port"
+    kill -9 $pid
+  fi
+done &
+
+# Open iterm logs
+log_step "Opening logs view" "$LOG_DIR/stack.log"
+osascript <<EOF
+tell application "iTerm2"
+    activate
+    
+    -- Create new tab in current window, or create new window if none exists
+    if (count of windows) > 0 then
+        tell current window
+            create tab with profile "ES SLS"
+        end tell
+    else
+        create window with profile "ES SLS"
+    end if
+    
+    -- Set window to fully expanded size (not fullscreen)
+    tell current window
+        set bounds to {0, 0, 1920, 1080}
+        -- Alternative: get screen dimensions dynamically
+        -- tell application "Finder" to set {screen_width, screen_height} to bounds of window of desktop
+        -- set bounds to {0, 0, screen_width, screen_height - 100}
+    end tell
+    
+    -- Set up the splits with profiles
+    tell current session of current tab of current window
+        split horizontally with profile "ES Stack"
+        split vertically with profile "KBN SLS"
+    end tell
+    tell last session of current tab of current window
+        split vertically with profile "KBN Stack"
+    end tell
+end tell
+EOF
+# Don't always do this... maybe only if it fails. or if a flag is passed
+log_step "Cleaning ES cache..." "$LOG_DIR/stack.log"
+(
+  cd /Users/wildmat/workplace/kibana
+  rm -rf .es/cache/
+) >> "$LOG_DIR/stack.log" 2>&1
+
+
+# Start essls
+log_step "Starting essls..." "$ESSLS_LOG"
+(
+  cd /Users/wildmat/workplace/kibana
+  nvm use
+  yarn es serverless --projectType es --clean --kill
+) >> "$ESSLS_LOG" 2>&1 &
+ESSLS_PID=$!
+# Start esstack
+log_step "Starting esstack..." "$ESSTACK_LOG"
+(
+  cd /Users/wildmat/workplace/kibana
+  nvm use
+  yarn es snapshot --license trial --clean -E http.port=9201 -E transport.port=9301
+) >> "$ESSTACK_LOG" 2>&1 &
+ESSTACK_PID=$!
+# clean and bootstrap kibana
+log_step "Bootstrapping Kibana..." "$LOG_DIR/stack.log"
+(
+  cd /Users/wildmat/workplace/kibana
+  nvm use
+  # Clean if you see build errors, or force a full rebuild.
+  # TODO: flag to clean or not
+  # yarn kbn clean
+  # Bootstrap after clean, dependency/plugin setup change, branch change
+  yarn kbn bootstrap
+  # Bootstrap finishes synchronously.
+) >> "$LOG_DIR/stack.log" 2>&1
+# Start optimizer
+log_step "Starting optimizer..." "$LOG_DIR/stack.log"
+(
+  cd /Users/wildmat/workplace/kibana
+  nvm use
+  node scripts/build_kibana_platform_plugins --watch
+) >> "$OPTIMIZER_LOG" 2>&1 &
+OPTIMIZER_PID=$!
+
+echo "Optimizer started at PID: $OPTIMIZER_PID" | tee -a "$LOG_DIR/stack.log"
+
+# Wait for optimizer success message
+log_step "Waiting for optimizer to complete initial build..." "$LOG_DIR/stack.log"
+while true; do
+  if grep -q "succ.*bundles compiled successfully\|succ all bundles cached" "$OPTIMIZER_LOG" 2>/dev/null; then
+    log_step "Optimizer initial build completed successfully!" "$LOG_DIR/stack.log"
+    break
+  fi
+  sleep 2
+done
+
+# Function to start kbnsls (simple version)
+start_kbnsls() {
+  log_step "Starting kbnsls..." "$KBNSLS_LOG"
+  (
+    cd /Users/wildmat/workplace/kibana
+    nvm use
+    # export KBN_OPTIMIZER_MAX_WORKERS=4
+    export KBN_OPTIMIZER_USE_MAX_AVAILABLE_RESOURCES=false
+    yarn serverless-es --config=config/kibana.serverless.dev.yml --server.port=5601 --no-optimizer
+  ) >> "$KBNSLS_LOG" 2>&1
+}
+
+# Function to monitor and restart kbnsls
+monitor_kbnsls() {
+  local failures=0
+  local max_failures=3
+  
+  while true; do
+    start_kbnsls &
+    local pid=$!
+    wait $pid
+    local exit_code=$?
+    
+    if [ $exit_code -eq 1 ]; then
+      failures=$((failures + 1))
+      log_step "kbnsls failed with exit code 1 (failure $failures/$max_failures)" "$KBNSLS_LOG"
+      if [ $failures -lt $max_failures ]; then
+        log_step "Restarting kbnsls in 5 seconds..." "$LOG_DIR/stack.log"
+        sleep 5
+      else
+        log_step "kbnsls exceeded maximum failures ($max_failures). Terminating parent process." "$LOG_DIR/stack.log"
+        kill $$
+        exit 1
+      fi
+    else
+      log_step "kbnsls exited with code $exit_code (not restarting)" "$LOG_DIR/stack.log"
+      break
+    fi
+  done
+}
+
+# Kibana processes are started automatically after ES clusters are ready (see above)
+# Function to start kbnstack (simple version)
+start_kbnstack() {
+  log_step "Starting kbnstack..." "$KBNSTACK_LOG"
+  (
+    cd /Users/wildmat/workplace/kibana
+    nvm use
+    # export KBN_OPTIMIZER_MAX_WORKERS=1
+    export KBN_OPTIMIZER_USE_MAX_AVAILABLE_RESOURCES=false
+    # export KBN_OPTIMIZER_ENABLED=false
+    yarn start --config=config/kibana.stack.dev.yml --server.port=5611 --no-optimizer
+  ) >> "$KBNSTACK_LOG" 2>&1
+}
+
+# Function to monitor and restart kbnstack
+monitor_kbnstack() {
+  local failures=0
+  local max_failures=3
+  
+  while true; do
+    start_kbnstack &
+    local pid=$!
+    wait $pid
+    local exit_code=$?
+    
+    if [ $exit_code -eq 1 ]; then
+      failures=$((failures + 1))
+      log_step "kbnstack failed with exit code 1 (failure $failures/$max_failures)" "$KBNSTACK_LOG"
+      if [ $failures -lt $max_failures ]; then
+        log_step "Restarting kbnstack in 5 seconds..." "$LOG_DIR/stack.log"
+        sleep 5
+      else
+        log_step "kbnstack exceeded maximum failures ($max_failures). Terminating parent process." "$LOG_DIR/stack.log"
+        kill $$
+        exit 1
+      fi
+    else
+      log_step "kbnstack exited with code $exit_code (not restarting)" "$LOG_DIR/stack.log"
+      break
+    fi
+  done
+}
+
+# After optimizer is ready, wait for ES clusters and start respective Kibana processes
+# Wait for essls to be ready, then start kbnsls
+(
+  log_step "Waiting for essls to be ready..." "$LOG_DIR/stack.log"
+  while true; do
+    if grep -q "succ Serverless ES cluster running" "$ESSLS_LOG" 2>/dev/null; then
+      log_step "essls is ready! Starting kbnsls..." "$LOG_DIR/stack.log"
+      monitor_kbnsls &
+      KBNSLS_PID=$!
+      break
+    fi
+    sleep 2
+  done
+) &
+
+# Wait for esstack to be ready, then start kbnstack
+(
+  log_step "Waiting for esstack to be ready..." "$LOG_DIR/stack.log"
+  while true; do
+    if grep -q "succ ES cluster is ready" "$ESSTACK_LOG" 2>/dev/null; then
+      log_step "esstack is ready! Starting kbnstack..." "$LOG_DIR/stack.log"
+      monitor_kbnstack &
+      KBNSTACK_PID=$!
+      break
+    fi
+    sleep 2
+  done
+) &
+
+# kbnstack is started automatically after esstack is ready (see above)
+
+# Wait for kbnsls to be ready before opening Chrome
+log_step "Waiting for kbnsls to be available..." "$LOG_DIR/stack.log"
+while true; do
+  if grep -q "\[INFO \]\[status\] Kibana is now available" "$KBNSLS_LOG" 2>/dev/null; then
+    log_step "kbnsls is now available!" "$LOG_DIR/stack.log"
+    break
+  fi
+  sleep 2
+done
+
+log_step "Opening Chrome for kbnsls (5601)..." "$LOG_DIR/stack.log"
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --incognito --user-data-dir="/tmp/chrome-profile-5601" http://localhost:5601 2>/dev/null &
+SLS_CHROME_PID=$!
+
+# Wait for kbnstack to be ready before opening Chrome
+log_step "Waiting for kbnstack to be available..." "$LOG_DIR/stack.log"
+while true; do
+  if grep -q "\[INFO \]\[status\] Kibana is now available" "$KBNSTACK_LOG" 2>/dev/null; then
+    log_step "kbnstack is now available!" "$LOG_DIR/stack.log"
+    break
+  fi
+  sleep 2
+done
+
+log_step "Opening Chrome for kbnstack (5611)..." "$LOG_DIR/stack.log"
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --incognito --user-data-dir="/tmp/chrome-profile-5611" http://localhost:5611 2>/dev/null &
+STACK_CHROME_PID=$!
+
+# Log all the process IDs:
+log_step "All processes started:" "$LOG_DIR/stack.log"
+echo "OPTIMIZER PID: $OPTIMIZER_PID" | tee -a "$LOG_DIR/stack.log"
+echo "ESSLS PID: $ESSLS_PID" | tee -a "$LOG_DIR/stack.log"
+echo "ESSTACK PID: $ESSTACK_PID" | tee -a "$LOG_DIR/stack.log"
+echo "KBNSLS PID: $KBNSLS_PID" | tee -a "$LOG_DIR/stack.log"
+echo "KBNSTACK PID: $KBNSTACK_PID" | tee -a "$LOG_DIR/stack.log"
+echo "SLS Chrome PID: $SLS_CHROME_PID" | tee -a "$LOG_DIR/stack.log"
+echo "STACK Chrome PID: $STACK_CHROME_PID" | tee -a "$LOG_DIR/stack.log"
+
+# Handle Ctrl+C to kill all child processes
+trap "echo 'Stopping all processes...'; kill $OPTIMIZER_PID $ESSLS_PID $ESSTACK_PID $KBNSLS_PID $KBNSTACK_PID $SLS_CHROME_PID $STACK_CHROME_PID 2>/dev/null; exit" SIGINT
+
+# Wait for all background processes
+wait
