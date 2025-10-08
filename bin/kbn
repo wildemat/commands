@@ -277,7 +277,9 @@ monitor_kbnstack() {
     if grep -q "succ Serverless ES cluster running" "$ESSLS_LOG" 2>/dev/null; then
       log_step "essls is ready! Starting kbnsls..." "$LOG_DIR/stack.log"
       monitor_kbnsls &
-      KBNSLS_PID=$!
+      pid=$!
+      # Write PID to a temp file so parent can read it
+      echo "$pid" > "$LOG_DIR/kbnsls.pid"
       break
     fi
     sleep 2
@@ -291,7 +293,9 @@ monitor_kbnstack() {
     if grep -q "succ ES cluster is ready" "$ESSTACK_LOG" 2>/dev/null; then
       log_step "esstack is ready! Starting kbnstack..." "$LOG_DIR/stack.log"
       monitor_kbnstack &
-      KBNSTACK_PID=$!
+      pid=$!
+      # Write PID to a temp file so parent can read it
+      echo "$pid" > "$LOG_DIR/kbnstack.pid"
       break
     fi
     sleep 2
@@ -327,6 +331,14 @@ done
 log_step "Opening Chrome for kbnstack (5611)..." "$LOG_DIR/stack.log"
 /Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome --incognito --user-data-dir="/tmp/chrome-profile-5611" http://localhost:5611 2>/dev/null &
 STACK_CHROME_PID=$!
+
+# Read the PIDs from temp files
+if [ -f "$LOG_DIR/kbnsls.pid" ]; then
+  KBNSLS_PID=$(cat "$LOG_DIR/kbnsls.pid")
+fi
+if [ -f "$LOG_DIR/kbnstack.pid" ]; then
+  KBNSTACK_PID=$(cat "$LOG_DIR/kbnstack.pid")
+fi
 
 # Log all the process IDs:
 log_step "All processes started:" "$LOG_DIR/stack.log"
