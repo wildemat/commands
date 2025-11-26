@@ -12,6 +12,31 @@ KBNSLS_PID=""
 KBNSTACK_PID=""
 SLS_CHROME_PID=""
 STACK_CHROME_PID=""
+ITERM_WINDOW_ID=""
+ITERM_TAB_ID=""
+
+# TODO: 
+# Sometimes, when switching branches, kibana crashes. 5601 process orphaned. Need to kill it manually.
+# Error message port already in use. With any kibana crashes, should just kill and restart both
+# kibana processes while keeping essls and esstack running.
+# Move over to a managed tool. process doesn't hang open. Run cli command to list/restart/manage processes.
+# Leave things running while bootstrap and restart kibana etc. Kill one or more not all at the same time.
+# Leave stack ES open while switching branches for kibana.
+# Specify your own URL for ES cluster when running stack. 
+# Tweak optimizer dials for both kibana processes and restart.
+# Optional chain commands you can specify (e.g. opening iTerm windows), symlink to some script file you have that gets
+# hit by callback
+# Determine if any changes needed in kibana scripts to support.
+
+# Switching branches error:
+# [2025-10-23T12:10:57.401-04:00][INFO ][root] Kibana is shutting down
+# [2025-10-23T12:10:57.408-04:00][FATAL][root] Reason: Cannot find module '@kbn/visualizations-common'
+# Sometimes after an update, 5601 still works but logs show
+#  FATAL  Error: Port 5601 is already in use. Another instance of Kibana may be running!
+#  server crashed  with status code 1
+#  any way to restart the tail of the logs and pick up the new process and track that process id instead of the old one?
+
+
 
 # Function to cleanup all processes
 cleanup() {
@@ -26,7 +51,7 @@ cleanup() {
   done
   # Note: We don't kill processes by port anymore to avoid interfering with Docker
   # Only kill the specific processes we started and track
-  
+
   # Clean up Docker containers that might have been started by ES processes
   echo "Cleaning up Docker containers..."
   if command -v docker >/dev/null 2>&1; then
@@ -39,11 +64,31 @@ cleanup() {
         docker rm "$container_id" 2>/dev/null || true
       fi
     done
-    
+
     # Only clean up containers that are explicitly named for our ES processes
     # Don't kill containers just because they use the same ports
     echo "Docker container cleanup completed (conservative approach)"
   fi
+
+  # Close the iTerm tab that was created
+  if [ -n "$ITERM_WINDOW_ID" ] && [ -n "$ITERM_TAB_ID" ]; then
+    echo "Closing iTerm tab (window: $ITERM_WINDOW_ID, tab: $ITERM_TAB_ID)..."
+    osascript <<EOF 2>/dev/null || true
+tell application "iTerm2"
+    tell window id $ITERM_WINDOW_ID
+        tell tab $ITERM_TAB_ID
+            set sessionCount to count of sessions
+            repeat sessionCount times
+                try
+                    close first session
+                end try
+            end repeat
+        end tell
+    end tell
+end tell
+EOF
+  fi
+
   echo 'Cleanup complete.'
   exit
 }
@@ -93,10 +138,10 @@ done
 
 # Open iterm logs
 log_step "Opening logs view" "$LOG_DIR/stack.log"
-osascript <<EOF
+ITERM_IDS=$(osascript <<EOF
 tell application "iTerm2"
     activate
-    
+
     -- Create new tab in current window, or create new window if none exists
     if (count of windows) > 0 then
         tell current window
@@ -105,7 +150,7 @@ tell application "iTerm2"
     else
         create window with profile "ES SLS"
     end if
-    
+
     -- Set window to fully expanded size (not fullscreen)
     tell current window
         set bounds to {0, 0, 1920, 1080}
@@ -113,7 +158,7 @@ tell application "iTerm2"
         -- tell application "Finder" to set {screen_width, screen_height} to bounds of window of desktop
         -- set bounds to {0, 0, screen_width, screen_height - 100}
     end tell
-    
+
     -- Set up the splits with profiles
     tell current session of current tab of current window
         split horizontally with profile "ES Stack"
@@ -122,8 +167,20 @@ tell application "iTerm2"
     tell last session of current tab of current window
         split vertically with profile "KBN Stack"
     end tell
+
+    -- Return window ID and tab index (position)
+    tell current window
+        set windowId to id
+        set tabIndex to (count of tabs)
+        return (windowId as text) & "," & (tabIndex as text)
+    end tell
 end tell
 EOF
+)
+echo "DEBUG: ITERM_IDS=$ITERM_IDS" | tee -a "$LOG_DIR/stack.log"
+ITERM_WINDOW_ID=$(echo "$ITERM_IDS" | cut -d',' -f1)
+ITERM_TAB_ID=$(echo "$ITERM_IDS" | cut -d',' -f2)
+echo "DEBUG: ITERM_WINDOW_ID=$ITERM_WINDOW_ID, ITERM_TAB_ID=$ITERM_TAB_ID" | tee -a "$LOG_DIR/stack.log"
 # Only clean ES cache if --clean flag is passed
 if [ "$CLEAN_CACHE" = true ]; then
   log_step "Cleaning ES cache..." "$LOG_DIR/stack.log"
@@ -153,14 +210,15 @@ log_step "Starting esstack..." "$ESSTACK_LOG"
 ) >> "$ESSTACK_LOG" 2>&1 &
 ESSTACK_PID=$!
 # clean and bootstrap kibana
-log_step "Bootstrapping Kibana..." "$LOG_DIR/stack.log"
 (
   cd /Users/wildmat/workplace/kibana
   nvm use
   # Clean if you see build errors, or force a full rebuild.
-  # TODO: flag to clean or not
-  # yarn kbn clean
-  # Bootstrap after clean, dependency/plugin setup change, branch change
+  if [ "$CLEAN_CACHE" = true ]; then
+    log_step "Cleaning Kibana cache..." "$LOG_DIR/stack.log"
+    yarn kbn clean
+  fi
+  log_step "Bootstrapping Kibana..." "$LOG_DIR/stack.log"
   yarn kbn bootstrap
   # Bootstrap finishes synchronously.
 ) >> "$LOG_DIR/stack.log" 2>&1
