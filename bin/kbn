@@ -198,7 +198,7 @@ log_step "Starting essls..." "$ESSLS_LOG"
 (
   cd /Users/wildmat/workplace/kibana
   nvm use
-  yarn es serverless --projectType es --clean --kill
+  yarn es serverless --projectType elasticsearch_general_purpose --clean --kill -E xpack.inference.elastic.url=https://localhost:8443 -E xpack.inference.elastic.http.ssl.verification_mode=none
 ) >> "$ESSLS_LOG" 2>&1 &
 ESSLS_PID=$!
 # Start esstack
@@ -206,7 +206,7 @@ log_step "Starting esstack..." "$ESSTACK_LOG"
 (
   cd /Users/wildmat/workplace/kibana
   nvm use
-  yarn es snapshot --license trial --clean -E http.port=9201 -E transport.port=9301
+  yarn es snapshot --license trial --clean -E http.port=9201 -E transport.port=9301 -E xpack.inference.elastic.url=https://localhost:8443 -E xpack.inference.elastic.http.ssl.verification_mode=none
 ) >> "$ESSTACK_LOG" 2>&1 &
 ESSTACK_PID=$!
 # clean and bootstrap kibana
@@ -251,7 +251,7 @@ start_kbnsls() {
     nvm use
     # export KBN_OPTIMIZER_MAX_WORKERS=4
     export KBN_OPTIMIZER_USE_MAX_AVAILABLE_RESOURCES=false
-    yarn serverless-es --config=config/kibana.serverless.dev.yml --server.port=5601 --no-optimizer
+    yarn serverless-es --config=config/kibana.serverless.dev.yml --server.port=5601 --no-optimizer 
   ) >> "$KBNSLS_LOG" 2>&1
 }
 
@@ -295,6 +295,7 @@ start_kbnstack() {
     export KBN_OPTIMIZER_USE_MAX_AVAILABLE_RESOURCES=false
     # export KBN_OPTIMIZER_ENABLED=false
     yarn start --config=config/kibana.stack.dev.yml --server.port=5611 --no-optimizer
+    
   ) >> "$KBNSTACK_LOG" 2>&1
 }
 
