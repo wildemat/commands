@@ -27,6 +27,7 @@ ITERM_TAB_ID=""
 # Optional chain commands you can specify (e.g. opening iTerm windows), symlink to some script file you have that gets
 # hit by callback
 # Determine if any changes needed in kibana scripts to support.
+# Parent orchestrator process to manage all the processes. While running, can restart specific processes, open logs, etc.
 
 # Switching branches error:
 # [2025-10-23T12:10:57.401-04:00][INFO ][root] Kibana is shutting down
