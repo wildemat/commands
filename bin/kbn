@@ -28,6 +28,7 @@ ITERM_TAB_ID=""
 # hit by callback
 # Determine if any changes needed in kibana scripts to support.
 # Parent orchestrator process to manage all the processes. While running, can restart specific processes, open logs, etc.
+# write that in go....
 
 # Switching branches error:
 # [2025-10-23T12:10:57.401-04:00][INFO ][root] Kibana is shutting down
