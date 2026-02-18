@@ -200,7 +200,8 @@ log_step "Starting essls..." "$ESSLS_LOG"
 (
   cd /Users/wildmat/workplace/kibana
   nvm use
-  yarn es serverless --projectType elasticsearch_general_purpose --clean --kill -E xpack.inference.elastic.url=https://localhost:8443 -E xpack.inference.elastic.http.ssl.verification_mode=none
+  yarn es serverless --projectType elasticsearch_general_purpose --clean --kill -E xpack.inference.elastic.url=https://inference.eu-west-1.aws.svc.qa.elastic.cloud
+
 ) >> "$ESSLS_LOG" 2>&1 &
 ESSLS_PID=$!
 # Start esstack
@@ -208,7 +209,8 @@ log_step "Starting esstack..." "$ESSTACK_LOG"
 (
   cd /Users/wildmat/workplace/kibana
   nvm use
-  yarn es snapshot --license trial --clean -E http.port=9201 -E transport.port=9301 -E xpack.inference.elastic.url=https://localhost:8443 -E xpack.inference.elastic.http.ssl.verification_mode=none
+  yarn es snapshot --license trial --clean -E http.port=9201 -E transport.port=9301 -E xpack.inference.elastic.url=https://inference.eu-west-1.aws.svc.qa.elastic.cloud
+
 ) >> "$ESSTACK_LOG" 2>&1 &
 ESSTACK_PID=$!
 # clean and bootstrap kibana
