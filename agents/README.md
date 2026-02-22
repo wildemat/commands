@@ -13,11 +13,20 @@ When an agent is pointed to this directory, it should treat the contents here as
 ## Source Map
 
 ### `/prompts/`
+
 Reusable prompt files, templates, and prompt-quality standards.
 
-| File | Description |
-|------|-------------|
+| File           | Description                                                                                                                                               |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `STANDARDS.md` | Standards that prompts should conform to. Agents working with prompts should read this first and apply the defined behavior when context is insufficient. |
+
+### '/extensions/'
+
+Guidelines on which tools, mcps, skills, scripts and extensions should be used to complete tasks.
+
+| File        | Description                                               |
+| ----------- | --------------------------------------------------------- |
+| `AGENTS.md` | Main resource for agents to determine usage of extensions |
 
 ---
 
@@ -40,12 +49,14 @@ All files and sections in this directory must be timestamped. Agents must follow
 
 **When creating a new file:**
 Add these lines at the very top of the file, before any other content:
+
 ```
 _created_at: YYYY-MM-DD_
 ```
 
 **When adding a new section to an existing file:**
 Add a timestamp on the line immediately after the section heading:
+
 ```
 ## Section Title
 _created_at: YYYY-MM-DD_
@@ -53,6 +64,7 @@ _created_at: YYYY-MM-DD_
 
 **When editing existing content:**
 Add or append an `_edited_` line directly beneath the existing `_created_at_` line for that file or section:
+
 ```
 _created_at: YYYY-MM-DD_
 _edited: YYYY-MM-DD_
@@ -67,6 +79,7 @@ Only add an `_edited_` entry when the edit occurs on a **different day** than th
 **Any agent that adds a file or directory to this folder must update the source map in this README.**
 
 When adding an entry:
+
 - Add the file or directory under the appropriate section, or create a new section if it introduces a new category.
 - Write a single-sentence description that tells another agent what the file contains and when to use it.
 - Keep descriptions brief — this is a navigation aid, not documentation.
