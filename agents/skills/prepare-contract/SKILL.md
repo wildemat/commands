@@ -94,5 +94,5 @@ SUPPORTING RESOURCES:
 - Helper function at /src/server/util/helper.ts
 - Official documentation at http://site.com/api/docs/getData
 - Previous commit with a similar structure at github.com/repo/commit/asdf
--
+- Architecture diagram generated at: {filepath}
 ```

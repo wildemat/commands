@@ -1,0 +1,18 @@
+export PATH=$PATH:/var/services/homes/miraclebob/icloudpd-venv/bin/
+
+icloudpd -u mwilde345@gmail.com --auth-only
+
+https://www.reddit.com/r/ios/comments/1he7hm0/comment/m21lisp/ (or sign in via web email/pass to icloud.com to get code)
+
+
+icloudpd \
+  --cookie-directory ~/.pyicloud \
+  --log-level info \
+  --username "mwilde345@gmail.com" \
+  --directory "/volume1/iCloudStuff/" \
+  --skip-photos \
+  --keep-icloud-recent-days 60 \
+  --username "mwilde345@gmail.com" \
+  --directory "/volume1/iCloudStuff/" \
+  --skip-videos \
+  --keep-icloud-recent-days 180
