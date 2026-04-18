@@ -117,17 +117,25 @@ cmd_status() {
   pid_alive "$kbnsls_pid" && kbnsls_alive=true
   pid_alive "$kbnstack_pid" && kbnstack_alive=true
 
-  local essls_ready=false esstack_ready=false kbnsls_ready=false kbnstack_ready=false
-  check_ready "$LOG_DIR/essls.log" "succ Serverless ES cluster running" && essls_ready=true
-  check_ready "$LOG_DIR/esstack.log" "succ ES cluster is ready" && esstack_ready=true
-  check_ready "$LOG_DIR/kbnsls.log" "\[INFO \]\[status\] Kibana is now available" && kbnsls_ready=true
-  check_ready "$LOG_DIR/kbnstack.log" "\[INFO \]\[status\] Kibana is now available" && kbnstack_ready=true
-
   local p5601=false p5611=false p9200=false p9201=false
   port_listening 5601 && p5601=true
   port_listening 5611 && p5611=true
   port_listening 9200 && p9200=true
   port_listening 9201 && p9201=true
+
+  local essls_ready=false esstack_ready=false kbnsls_ready=false kbnstack_ready=false
+  if [ "$essls_alive" = true ] || [ "$p9200" = true ]; then
+    check_ready "$LOG_DIR/essls.log" "succ Serverless ES cluster running" && essls_ready=true
+  fi
+  if [ "$esstack_alive" = true ] || [ "$p9201" = true ]; then
+    check_ready "$LOG_DIR/esstack.log" "succ ES cluster is ready" && esstack_ready=true
+  fi
+  if [ "$kbnsls_alive" = true ] || [ "$p5601" = true ]; then
+    check_ready "$LOG_DIR/kbnsls.log" "\[INFO \]\[status\] Kibana is now available" && kbnsls_ready=true
+  fi
+  if [ "$kbnstack_alive" = true ] || [ "$p5611" = true ]; then
+    check_ready "$LOG_DIR/kbnstack.log" "\[INFO \]\[status\] Kibana is now available" && kbnstack_ready=true
+  fi
 
   if [ "$json_mode" = true ]; then
     cat <<EOF
