@@ -294,6 +294,7 @@ case "${1:-status}" in
   start)   shift; cmd_start "$@" ;;
   status)  shift 2>/dev/null || true; cmd_status "$@" ;;
   logs)    shift; cmd_logs "$@" ;;
+  attach)  exec tmux attach -t kbn-logs ;;
   restart) shift; cmd_restart "$@" ;;
   stop)    cmd_stop ;;
   -h|--help|help)
@@ -303,6 +304,7 @@ case "${1:-status}" in
     echo "  start [--clean] [--quiet]    Start kbn (if not already running)"
     echo "  status [--json]              Show component health"
     echo "  logs <component> [options]   View component logs"
+    echo "  attach                       Attach to the tmux log viewer"
     echo "  restart <kbnsls|kbnstack>    Restart a Kibana instance"
     echo "  stop                         Stop the kbn instance"
     echo ""
