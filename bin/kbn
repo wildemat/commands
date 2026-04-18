@@ -802,20 +802,47 @@ run_es_to_kibana_pipeline() {
 
 SLS_READY=false
 STACK_READY=false
+SLS_WAIT_DONE=false
+STACK_WAIT_DONE=false
 
-if wait_for_kibana "Kibana Serverless" "$KBNSLS_LOG" "$ESSLS_PID" "$LOG_DIR/kbnsls.pid" 5601; then
+# Wait for both in parallel using background subshells and marker files
+SLS_MARKER="$LOG_DIR/.sls_ready"
+STACK_MARKER="$LOG_DIR/.stack_ready"
+rm -f "$SLS_MARKER" "$STACK_MARKER"
+
+(
+  if wait_for_kibana "Kibana Serverless" "$KBNSLS_LOG" "$ESSLS_PID" "$LOG_DIR/kbnsls.pid" 5601; then
+    touch "$SLS_MARKER"
+  fi
+) &
+SLS_WAIT_PID=$!
+
+(
+  if wait_for_kibana "Kibana Stateful" "$KBNSTACK_LOG" "$ESSTACK_PID" "$LOG_DIR/kbnstack.pid" 5611; then
+    touch "$STACK_MARKER"
+  fi
+) &
+STACK_WAIT_PID=$!
+
+# Wait for both to finish
+wait $SLS_WAIT_PID 2>/dev/null
+wait $STACK_WAIT_PID 2>/dev/null
+
+if [ -f "$SLS_MARKER" ]; then
   log_step "Kibana Serverless is available at http://localhost:5601"
   SLS_READY=true
   open_chrome "http://localhost:5601" "$SLS_PROFILE"
   SLS_CHROME_PID="$LAST_CHROME_PID"
 fi
 
-if wait_for_kibana "Kibana Stateful" "$KBNSTACK_LOG" "$ESSTACK_PID" "$LOG_DIR/kbnstack.pid" 5611; then
+if [ -f "$STACK_MARKER" ]; then
   log_step "Kibana Stateful is available at http://localhost:5611"
   STACK_READY=true
   open_chrome "http://localhost:5611" "$STACK_PROFILE"
   STACK_CHROME_PID="$LAST_CHROME_PID"
 fi
+
+rm -f "$SLS_MARKER" "$STACK_MARKER"
 
 # --- Read child PIDs --------------------------------------------------------
 [ -f "$LOG_DIR/kbnsls.pid" ]  && KBNSLS_PID=$(cat "$LOG_DIR/kbnsls.pid")
@@ -829,10 +856,21 @@ if [ "$SLS_READY" = false ] && [ "$STACK_READY" = false ]; then
   echo " STARTUP FAILED"
   echo "============================================="
   echo ""
-  echo "  Neither Kibana instance came up. Check the logs above."
+  echo "  Neither Kibana instance came up. Check the logs:"
+  echo "    kbn-ctl logs essls --grep ERROR"
+  echo "    kbn-ctl logs esstack --grep ERROR"
+  echo ""
   echo "  Common causes: Docker not running, bootstrap needed (--clean), node mismatch."
   echo ""
   cleanup
+fi
+
+if [ "$SLS_READY" = false ] || [ "$STACK_READY" = false ]; then
+  echo ""
+  [ "$SLS_READY" = false ]  && echo "  WARNING: Kibana Serverless failed to start. Check: kbn-ctl logs essls --grep ERROR"
+  [ "$STACK_READY" = false ] && echo "  WARNING: Kibana Stateful failed to start. Check: kbn-ctl logs esstack --grep ERROR"
+  echo "  Continuing with available instance(s)."
+  echo ""
 fi
 
 write_status "running"
