@@ -52,9 +52,10 @@ kbn-ctl status --json         # machine-readable JSON
 kbn-ctl logs kbnsls           # last 50 lines of Kibana Serverless log
 kbn-ctl logs all --grep ERROR # errors across all components
 kbn-ctl logs kbnstack --follow  # live tail
+kbn-ctl attach                # attach to the tmux log viewer
 kbn-ctl restart kbnsls        # restart Kibana Serverless (ES stays up)
 kbn-ctl restart kbnstack      # restart Kibana Stateful
-kbn-ctl stop              # stop everything
+kbn-ctl stop                  # stop everything
 ```
 
 **Components:** `essls`, `esstack`, `optimizer`, `kbnsls`, `kbnstack`, `main`, `all`
