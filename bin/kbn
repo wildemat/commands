@@ -10,7 +10,7 @@
 #                         not set (checks standard macOS/Linux locations).
 #                         Override: export CHROME_BIN="/path/to/google-chrome"
 #   KBN_LOG_DIR           Directory for log files.
-#                         Default: ./logs/kbn-dev
+#                         Default: ~/.kbn/logs
 #   KBN_INFERENCE_URL     Elastic inference service URL.
 #                         Default: "https://inference.eu-west-1.aws.svc.qa.elastic.cloud"
 #                         Set to "" to disable EIS entirely.
@@ -177,7 +177,7 @@ if [ "$INTERACTIVE" = true ]; then
    KBN_INFERENCE_URL        EIS inference service URL
    KIBANA_EIS_CCM_API_KEY   Provide EIS API key directly (skips vault)
    CHROME_BIN               Path to Chrome binary (auto-detected if unset)
-   KBN_LOG_DIR              Log directory. Default: ./logs/kbn-dev
+   KBN_LOG_DIR              Log directory. Default: ~/.kbn/logs
    SKIP_BROWSER_LAUNCH      Set to any value to skip Chrome launch
 
  Flags:
@@ -340,7 +340,7 @@ open_chrome() {
 }
 
 # --- Logging ----------------------------------------------------------------
-LOG_DIR="${KBN_LOG_DIR:-$KBN_DIR/logs/kbn-dev}"
+LOG_DIR="${KBN_LOG_DIR:-$HOME/.kbn/logs}"
 mkdir -p "$LOG_DIR"
 
 # --- Kill previous instance -------------------------------------------------
@@ -554,7 +554,7 @@ echo "============================================="
 echo ""
 echo " LOGGING"
 echo "  Dir: $LOG_DIR"
-echo "  Override with: KBN_LOG_DIR=/your/path kbn"
+echo "  Override with: KBN_LOG_DIR=/your/path"
 if [ "$SHOW_LOGS" = true ]; then
   if command -v tmux >/dev/null 2>&1; then
     echo "  Tmux log viewer will open automatically (--quiet to disable)."

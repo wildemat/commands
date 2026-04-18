@@ -34,7 +34,7 @@ kbn --quiet         # skip the tmux log viewer
 | `KBN_INFERENCE_URL`      | `https://inference.eu-west-1.aws.svc.qa.elastic.cloud` | EIS URL. Set `""` to disable. |
 | `KIBANA_EIS_CCM_API_KEY` | (none)                                                 | Skip vault, use key directly. |
 | `CHROME_BIN`             | auto-detected                                          | Path to Chrome binary.        |
-| `KBN_LOG_DIR`            | `./logs/kbn-dev`                                       | Log file directory.           |
+| `KBN_LOG_DIR`            | `~/.kbn/logs`                                          | Log file directory.            |
 | `SKIP_BROWSER_LAUNCH`    | (unset)                                                | Set to skip Chrome launch.    |
 
 **Non-interactive mode:** When stdin is not a terminal (piped, CI, agent),
@@ -42,16 +42,18 @@ interactive prompts auto-accept and verbose banners are suppressed.
 
 ### `kbn-ctl` — Control Plane
 
-Query and control a running `kbn` instance without restarting everything.
+Query and control a `kbn` instance. Can also start it.
 
 ```bash
-kbn-ctl status            # human-readable health table
-kbn-ctl status --json     # machine-readable JSON
-kbn-ctl logs kbnsls       # last 50 lines of Kibana Serverless log
-kbn-ctl logs all --grep ERROR   # errors across all components
+kbn-ctl start                 # start kbn (finds kibana repo automatically)
+kbn-ctl start --clean --quiet # clean start, no tmux viewer
+kbn-ctl status                # human-readable health table
+kbn-ctl status --json         # machine-readable JSON
+kbn-ctl logs kbnsls           # last 50 lines of Kibana Serverless log
+kbn-ctl logs all --grep ERROR # errors across all components
 kbn-ctl logs kbnstack --follow  # live tail
-kbn-ctl restart kbnsls    # restart Kibana Serverless (ES stays up)
-kbn-ctl restart kbnstack  # restart Kibana Stateful
+kbn-ctl restart kbnsls        # restart Kibana Serverless (ES stays up)
+kbn-ctl restart kbnstack      # restart Kibana Stateful
 kbn-ctl stop              # stop everything
 ```
 
