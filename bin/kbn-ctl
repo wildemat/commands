@@ -11,6 +11,7 @@
 #     [--grep PATTERN]                   Filter lines
 #   kbn-ctl restart <component>        Restart kbnsls or kbnstack
 #   kbn-ctl stop                       Stop the entire kbn instance
+#   kbn-ctl run <command...>           Run a command with the correct node/nvm
 #
 # Components: essls, esstack, optimizer, kbnsls, kbnstack, all
 #
@@ -19,6 +20,24 @@
 # ---------------------------------------------------------------------------
 
 set -euo pipefail
+
+# --- Node / nvm setup -------------------------------------------------------
+# Agent shells (Claude Code, Cursor, CI) don't load nvm by default, so yarn
+# commands fail with "The engine node is incompatible". Source nvm here so
+# every kbn-ctl subcommand (including `start` → `exec kbn`) sees the right
+# node binary. Mirrors the same block in `kbn`.
+if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh" --no-use
+  # If there's an .nvmrc in cwd (i.e. kibana repo), switch to it silently.
+  if [ -f ".nvmrc" ]; then
+    nvm use --silent 2>/dev/null || true
+  fi
+  if [ -n "${NVM_BIN:-}" ]; then
+    export PATH="$NVM_BIN:$PATH"
+  fi
+fi
 
 # --- Locate log directory ---------------------------------------------------
 find_log_dir() {
@@ -62,7 +81,15 @@ check_ready() {
 }
 
 # --- status -----------------------------------------------------------------
+# Status is a read-only query; disable errexit/pipefail so a grep no-match
+# (exit 1) inside a pipeline can't kill the whole script. This was the cause
+# of false "not running" reports: if status.json was mid-write or had an
+# unexpected format, grep failed → pipefail propagated exit 1 → set -e
+# killed the script before any output → the fallback in the skill's dynamic
+# injection returned {"running": false}.
 cmd_status() {
+  set +eo pipefail
+
   local json_mode=false
   [ "${1:-}" = "--json" ] && json_mode=true
 
@@ -76,11 +103,11 @@ cmd_status() {
 
   local essls_pid="" esstack_pid="" optimizer_pid="" kbnsls_pid="" kbnstack_pid=""
   if [ -f "$STATUS_FILE" ]; then
-    essls_pid=$(grep -o '"essls".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g')
-    esstack_pid=$(grep -o '"esstack".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g')
-    optimizer_pid=$(grep -o '"optimizer".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g')
-    kbnsls_pid=$(grep -o '"kbnsls".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g')
-    kbnstack_pid=$(grep -o '"kbnstack".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g')
+    essls_pid=$(grep -o '"essls".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g') || true
+    esstack_pid=$(grep -o '"esstack".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g') || true
+    optimizer_pid=$(grep -o '"optimizer".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g') || true
+    kbnsls_pid=$(grep -o '"kbnsls".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g') || true
+    kbnstack_pid=$(grep -o '"kbnstack".*"pid": *"[^"]*"' "$STATUS_FILE" 2>/dev/null | grep -o '"pid": *"[^"]*"' | head -1 | sed 's/.*"pid": *"//;s/"//g') || true
   fi
 
   local essls_alive=false esstack_alive=false optimizer_alive=false
@@ -104,10 +131,10 @@ cmd_status() {
   if [ "$esstack_alive" = true ] || [ "$p9201" = true ]; then
     check_ready "$LOG_DIR/esstack.log" "succ ES cluster is ready" && esstack_ready=true
   fi
-  if [ "$kbnsls_alive" = true ] || [ "$p5601" = true ]; then
+  if [ "$p5601" = true ]; then
     check_ready "$LOG_DIR/kbnsls.log" "\[INFO \]\[status\] Kibana is now available" && kbnsls_ready=true
   fi
-  if [ "$kbnstack_alive" = true ] || [ "$p5611" = true ]; then
+  if [ "$p5611" = true ]; then
     check_ready "$LOG_DIR/kbnstack.log" "\[INFO \]\[status\] Kibana is now available" && kbnstack_ready=true
   fi
 
@@ -215,35 +242,39 @@ cmd_logs() {
 # --- restart ----------------------------------------------------------------
 cmd_restart() {
   local comp="${1:-}"
-  if [ "$comp" != "kbnsls" ] && [ "$comp" != "kbnstack" ]; then
-    echo "Usage: kbn-ctl restart <kbnsls|kbnstack>"
-    echo "  Only Kibana processes support restart (ES clusters and optimizer stay running)."
+  if [ "$comp" != "kbnsls" ] && [ "$comp" != "kbnstack" ] && [ "$comp" != "serverless" ] && [ "$comp" != "stateful" ] && [ "$comp" != "all" ]; then
+    echo "Usage: kbn-ctl restart <serverless|stateful|all>"
+    echo "  Restarts both ES and Kibana for the given mode."
+    echo "  Aliases: kbnsls = serverless, kbnstack = stateful"
     exit 1
   fi
 
-  local port pidfile
-  if [ "$comp" = "kbnsls" ]; then
-    port=5601
-    pidfile="$LOG_DIR/kbnsls.pid"
+  [ "$comp" = "kbnsls" ] && comp="serverless"
+  [ "$comp" = "kbnstack" ] && comp="stateful"
+
+  echo "Restarting $comp — this does a full stop + start."
+  echo ""
+
+  cmd_stop
+  sleep 3
+
+  if ! [ -f "package.json" ] || ! grep -q '"name": "kibana"' package.json 2>/dev/null; then
+    echo ""
+    echo "  Stopped. To start again, run from the kibana repo root:"
+    echo "    kbn-ctl start"
+    return
+  fi
+
+  echo ""
+  if [ -t 0 ]; then
+    echo "  Starting kbn..."
+    exec kbn
   else
-    port=5611
-    pidfile="$LOG_DIR/kbnstack.pid"
+    echo "  Starting kbn in background..."
+    kbn --quiet &
+    echo "  PID: $!"
+    echo "  Use 'kbn-ctl status' to monitor."
   fi
-
-  echo "Restarting $comp..."
-
-  # Kill the Kibana process on its port
-  local kbn_port_pid
-  kbn_port_pid=$(lsof -ti "tcp:$port" 2>/dev/null)
-  if [ -n "$kbn_port_pid" ]; then
-    echo "  Killing process $kbn_port_pid on port $port"
-    kill "$kbn_port_pid" 2>/dev/null || true
-    sleep 2
-    kill -0 "$kbn_port_pid" 2>/dev/null && kill -9 "$kbn_port_pid" 2>/dev/null || true
-  fi
-
-  echo "  The monitor_process loop in kbn will auto-restart $comp."
-  echo "  Watch the logs: tail -f $(component_log "$comp")"
 }
 
 # --- start ------------------------------------------------------------------
@@ -289,6 +320,21 @@ cmd_stop() {
   echo "Sent SIGTERM. Cleanup will handle child processes."
 }
 
+# --- run --------------------------------------------------------------------
+cmd_run() {
+  if [ $# -eq 0 ]; then
+    echo "Usage: kbn-ctl run <command...>"
+    echo "  Runs any command with nvm/node already set up for the kibana repo."
+    echo ""
+    echo "Examples:"
+    echo "  kbn-ctl run yarn kbn bootstrap"
+    echo "  kbn-ctl run yarn es serverless --clean --kill"
+    echo "  kbn-ctl run node --version"
+    exit 1
+  fi
+  exec "$@"
+}
+
 # --- Main dispatch ----------------------------------------------------------
 case "${1:-status}" in
   start)   shift; cmd_start "$@" ;;
@@ -297,6 +343,7 @@ case "${1:-status}" in
   attach)  exec tmux attach -t kbn-logs ;;
   restart) shift; cmd_restart "$@" ;;
   stop)    cmd_stop ;;
+  run)     shift; cmd_run "$@" ;;
   -h|--help|help)
     echo "Usage: kbn-ctl <command> [options]"
     echo ""
@@ -305,8 +352,9 @@ case "${1:-status}" in
     echo "  status [--json]              Show component health"
     echo "  logs <component> [options]   View component logs"
     echo "  attach                       Attach to the tmux log viewer"
-    echo "  restart <kbnsls|kbnstack>    Restart a Kibana instance"
+    echo "  restart <serverless|stateful|all>  Full restart (ES + Kibana)"
     echo "  stop                         Stop the kbn instance"
+    echo "  run <command...>             Run a command with correct node/nvm"
     echo ""
     echo "Components: essls, esstack, optimizer, kbnsls, kbnstack, main, all"
     echo ""

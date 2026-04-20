@@ -39,12 +39,14 @@
 # Interactive prompts auto-accept and verbose banners are suppressed.
 INTERACTIVE=true
 [ -t 0 ] || INTERACTIVE=false
+SHUTTING_DOWN=false
 
 # =============================================================================
 # Utility functions
 # =============================================================================
 
 log_step() {
+  [ "$SHUTTING_DOWN" = true ] && return
   local msg="$1"
   local logfile="${2:-}"
   local line
@@ -367,6 +369,7 @@ STACK_CHROME_PID=""
 
 # --- Cleanup on exit --------------------------------------------------------
 cleanup() {
+  SHUTTING_DOWN=true
   set +m 2>/dev/null
   echo ""
   echo "Stopping all processes..."
@@ -573,16 +576,9 @@ echo "============================================="
 if [ "$SHOW_LOGS" = true ]; then
   open_tmux_logs
   echo ""
-  echo "  tmux session 'kbn-logs' opened. Run 'kbn-ctl attach' to open it."
-  if command -v pbcopy >/dev/null 2>&1; then
-    echo "tmux attach -t kbn-logs" | pbcopy
-    echo "  Copied to clipboard: tmux attach -t kbn-logs  (⌘V in a new tab)"
-  elif command -v xclip >/dev/null 2>&1; then
-    echo "tmux attach -t kbn-logs" | xclip -selection clipboard
-    echo "  Copied to clipboard: tmux attach -t kbn-logs"
-  else
-    echo "  Attach with: tmux attach -t kbn-logs"
-  fi
+  echo "  tmux session 'kbn-logs' opened. Attach in another terminal:"
+  echo ""
+  echo "    tmux attach -t kbn-logs"
   echo ""
 fi
 
@@ -616,6 +612,8 @@ if command -v docker >/dev/null 2>&1; then
     docker rmi $dangling 2>/dev/null || true
   fi
 
+  docker network rm elastic 2>/dev/null || true
+
   if [ "$CLEAN_CACHE" = true ]; then
     echo "  --clean: removing all kibana-ci images (will re-pull)..."
     # shellcheck disable=SC2046
@@ -643,19 +641,24 @@ fi
 log_step "Starting ES Serverless..." "$ESSLS_LOG"
 (
   cd "$KBN_DIR" || exit 1
+
+  # Retry up to 3 times in case of uiam/cosmosdb startup race.
+  # The Docker network cleanup before this step usually prevents the issue.
   max_attempts=3
   attempt=0
   while [ $attempt -lt $max_attempts ]; do
     attempt=$((attempt + 1))
+    [ $attempt -gt 1 ] && echo "" && echo "[$(date '+%Y-%m-%d %H:%M:%S')] ES Serverless attempt $attempt/$max_attempts..."
+
     # shellcheck disable=SC2086
     yarn es serverless \
       --projectType elasticsearch_general_purpose \
       --clean --kill \
       $INFERENCE_FLAG \
     && break
-    echo ""
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ES Serverless attempt $attempt/$max_attempts failed (uiam may need more time). Retrying..."
-    echo ""
+
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ES Serverless attempt $attempt/$max_attempts failed (uiam/cosmosdb startup race)."
+    sleep 5
   done
 ) >> "$ESSLS_LOG" 2>&1 &
 ESSLS_PID=$!
@@ -876,8 +879,14 @@ fi
 
 if [ "$SLS_READY" = false ] || [ "$STACK_READY" = false ]; then
   echo ""
-  [ "$SLS_READY" = false ]  && echo "  WARNING: Kibana Serverless failed to start. Check: kbn-ctl logs essls --grep ERROR"
-  [ "$STACK_READY" = false ] && echo "  WARNING: Kibana Stateful failed to start. Check: kbn-ctl logs esstack --grep ERROR"
+  if [ "$SLS_READY" = false ]; then
+    echo "  WARNING: Kibana Serverless failed to start."
+    echo "    Check: kbn-ctl logs essls --grep ERROR"
+  fi
+  if [ "$STACK_READY" = false ]; then
+    echo "  WARNING: Kibana Stateful failed to start."
+    echo "    Check: kbn-ctl logs esstack --grep ERROR"
+  fi
   echo "  Continuing with available instance(s)."
   echo ""
 fi

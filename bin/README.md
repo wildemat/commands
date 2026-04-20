@@ -56,6 +56,8 @@ kbn-ctl attach                # attach to the tmux log viewer
 kbn-ctl restart kbnsls        # restart Kibana Serverless (ES stays up)
 kbn-ctl restart kbnstack      # restart Kibana Stateful
 kbn-ctl stop                  # stop everything
+kbn-ctl run yarn kbn bootstrap  # run any command with correct node/nvm
+kbn-ctl run node --version      # check which node version is active
 ```
 
 **Components:** `essls`, `esstack`, `optimizer`, `kbnsls`, `kbnstack`, `main`, `all`
@@ -85,6 +87,122 @@ which kbn-ctl
 ```
 
 **Prerequisites:** Node.js (nvm), yarn, Docker, Chrome (optional), vault (for EIS).
+
+## Manual setup (without these scripts)
+
+If you want to run both serverless and stateful Kibana side-by-side
+without `kbn` or `kbn-ctl`, here's what you need to do manually.
+This is what the scripts automate.
+
+### 1. Switch to the correct Node version
+
+```bash
+cd /path/to/kibana
+nvm use    # reads .nvmrc
+```
+
+### 2. Bootstrap (if needed)
+
+```bash
+yarn kbn bootstrap
+```
+
+### 3. Clean up stale Docker containers
+
+Previous failed serverless runs leave containers behind that block
+the next start:
+
+```bash
+docker rm -f es01 es02 es03 uiam uiam-cosmosdb 2>/dev/null
+```
+
+### 4. Start ES Serverless (Terminal 1)
+
+```bash
+yarn es serverless \
+  --projectType elasticsearch_general_purpose \
+  --clean --kill
+```
+
+Wait for: `succ Serverless ES cluster running`
+
+### 5. Start ES Stateful (Terminal 2)
+
+Must use different ports to avoid conflicts with serverless:
+
+```bash
+yarn es snapshot \
+  --license trial --clean \
+  -E http.port=9201 \
+  -E transport.port=9301 \
+  -E xpack.ml.enabled=false
+```
+
+Wait for: `succ ES cluster is ready`
+
+### 6. Start the shared optimizer (Terminal 3)
+
+Running two Kibana instances each with their own optimizer uses
+~8-16GB RAM. A single shared optimizer avoids this:
+
+```bash
+node scripts/build_kibana_platform_plugins --watch
+```
+
+Wait for: `succ all bundles cached` or `succ ... bundles compiled successfully`
+
+### 7. (Optional) Run EIS setup
+
+If using Elastic Inference Service, run after each ES cluster is ready:
+
+```bash
+# Requires vault login first:
+# VAULT_ADDR=https://secrets.elastic.co:8200 vault login -method oidc
+node scripts/eis.js
+```
+
+### 8. Start Kibana Serverless (Terminal 4)
+
+```bash
+yarn serverless-es \
+  --server.port=5601 \
+  --no-optimizer
+```
+
+### 9. Start Kibana Stateful (Terminal 5)
+
+Must use a different port and cookie name to avoid auth conflicts
+with the serverless instance:
+
+```bash
+yarn start \
+  --config config/kibana.stack.dev.yml \
+  --server.port=5611 \
+  --xpack.security.cookieName=sid-stack \
+  --no-optimizer
+```
+
+### 10. Access
+
+- Serverless: http://localhost:5601 (select admin role)
+- Stateful: http://localhost:5611 (login: elastic / changeme)
+
+### Gotchas to know
+
+- **Startup order matters.** ES must be ready before Kibana starts.
+- **Cookie conflict.** Without `--xpack.security.cookieName=sid-stack`
+  on stateful, logging into one instance logs you out of the other.
+- **Optimizer memory.** Without `--no-optimizer` on both + a shared
+  optimizer, each Kibana spawns its own (~4-8GB each).
+- **Port conflicts.** If you don't set `-E http.port=9201` and
+  `-E transport.port=9301` on stateful ES, it clashes with serverless.
+- **Docker cleanup.** Stale `uiam`/`es0x` containers from a previous
+  serverless run cause the next one to fail with "unhealthy" errors.
+- **Orphaned processes.** If Kibana crashes, `node` processes stay on
+  ports 5601/5611 and block the next start. Kill them with
+  `lsof -ti tcp:5601 | xargs kill`.
+- **Branch switches.** After switching branches, you usually need
+  `yarn kbn clean && yarn kbn bootstrap` and a fresh start.
 
 ## Log Viewer
 

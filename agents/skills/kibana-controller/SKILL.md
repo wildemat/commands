@@ -133,12 +133,12 @@ automatically retry without user intervention:
    ```
 3. Restart the serverless ES cluster from the kibana repo:
    ```bash
-   cd /path/to/kibana && yarn es serverless --projectType elasticsearch_general_purpose --clean --kill &
+   cd /path/to/kibana && kbn-ctl run yarn es serverless --projectType elasticsearch_general_purpose --clean --kill &
    ```
 4. Poll `kbn-ctl status --json` for `essls.ready` becoming true (up to 5 min).
 5. Once ES Serverless is ready, start Kibana Serverless:
    ```bash
-   cd /path/to/kibana && KBN_OPTIMIZER_USE_MAX_AVAILABLE_RESOURCES=false yarn serverless-es --server.port=5601 --no-optimizer &
+   cd /path/to/kibana && KBN_OPTIMIZER_USE_MAX_AVAILABLE_RESOURCES=false kbn-ctl run yarn serverless-es --server.port=5601 --no-optimizer &
    ```
 6. Poll for `kbnsls.ready` or HTTP 200 on port 5601 (up to 2 min).
 7. Report result: "Serverless is now ready at :5601" or "Serverless
@@ -162,8 +162,30 @@ one message when ready (or failed).
 | Logs | `kbn-ctl logs <component> [--tail N] [--grep PATTERN]` |
 | Restart Kibana | `kbn-ctl restart <kbnsls\|kbnstack>` |
 | Stop | `kbn-ctl stop` |
+| Run with nvm | `kbn-ctl run <command...>` |
 
 Components: `essls`, `esstack`, `optimizer`, `kbnsls`, `kbnstack`, `main`, `all`
+
+### Viewing logs
+
+**"Open the logs" / "show me all logs":**
+The tmux log viewer requires an interactive terminal, so you can't attach
+to it directly. Tell the user to run it themselves:
+
+> Run `kbn-ctl attach` in your terminal to open the tmux log viewer with
+> all four panes (ES Serverless, ES Stateful, Kibana SLS, Kibana Stack).
+
+**Showing logs inline (what you CAN do):**
+Use `kbn-ctl logs <component>` to show logs in the agent shell. This
+works for targeted requests like "show me serverless errors":
+
+```bash
+kbn-ctl logs kbnsls --tail 50              # last 50 lines
+kbn-ctl logs all --grep "ERROR|FATAL"       # errors across all
+kbn-ctl logs essls --tail 20 --grep error   # ES serverless errors
+```
+
+Do NOT try to open terminal tabs, run AppleScript, or `tail -f` manually.
 
 ## When to restart Kibana
 
@@ -210,6 +232,29 @@ When the user asks "is X working" and you don't have browser tools,
 use curl to fetch the page and check for expected content, API status
 codes, or error messages.
 
+## Node version / nvm
+
+Agent shells (Claude Code, Cursor) do NOT load nvm by default. The system
+node (e.g. 23.x) will not match kibana's `.nvmrc` requirement, causing
+every `yarn` command to fail with "The engine node is incompatible".
+
+**`kbn` and `kbn-ctl` handle this automatically** — they source nvm and
+switch to the `.nvmrc` version before doing anything. Always invoke them
+directly (`kbn-ctl status --json`), **never through yarn**
+(`yarn kbn-dev-ctl` does not exist and will fail).
+
+**For any yarn/node commands** in the kibana repo, use `kbn-ctl run`:
+
+```bash
+kbn-ctl run yarn kbn bootstrap
+kbn-ctl run yarn es serverless --clean --kill
+kbn-ctl run node --version
+kbn-ctl run yarn start --no-optimizer
+```
+
+This handles nvm setup automatically — no need to source nvm manually.
+**Never** use the raw `source nvm && nvm use && yarn ...` incantation.
+
 ## Failure diagnosis
 
 See [failure-modes.md](failure-modes.md) for detailed patterns. Key fixes:
@@ -232,15 +277,41 @@ working, or to check/test UI behavior:
 Do NOT search the codebase for UI questions that can be answered by
 looking at or curling the running app.
 
-- **Serverless** (port 5601): navigate to `http://localhost:5601`.
-  If a login/role selection screen appears, select the **admin** role.
-  The dev serverless setup uses mock authentication — no password needed,
-  just pick the role from the selector.
-- **Stateful** (port 5611): navigate to `http://localhost:5611`.
-  If a login screen appears, enter username `elastic` and password
-  `changeme`. Always use these credentials for stateful.
+### Handling login screens
 
-Common Kibana app paths:
+When you navigate to a Kibana instance and see a login/auth screen
+instead of the expected page, handle it automatically:
+
+**Serverless (port 5601) — Role selector:**
+The dev serverless instance uses mock authentication. Instead of a
+username/password form, you'll see a **role selection page** with
+profile cards for different roles (e.g. `admin`, `editor`, `viewer`,
+`t1_analyst`, `t2_analyst`, etc.).
+- Look for a card/button labeled **"admin"** (or containing "admin"
+  in the role name) and click it.
+- Default to `admin` unless the user specifically requests a different
+  role.
+- After selecting a role, you'll be redirected to the Kibana app. If
+  you land on a space selector, pick **Default** space.
+- There is no password. Just select the role.
+
+**Stateful (port 5611) — Login form:**
+The stateful instance uses a standard login form.
+- Find the **username** input field and type: `elastic`
+- Find the **password** input field and type: `changeme`
+- Click the **"Log in"** button.
+- If you see an "Enter code" or enrollment screen instead, the ES
+  cluster may not be configured correctly — report this to the user.
+
+**Detecting auth screens:**
+- If the URL contains `/login` or the page shows "Log in to Elastic"
+  or a role selector grid, you're on an auth page.
+- If you see a 401 or "Unauthorized" response, the session expired —
+  repeat the login flow.
+- After successful auth, navigate to the originally requested URL.
+
+### Common Kibana app paths
+
 - Getting started / onboarding: `/app/elasticsearch/start`
 - Search / indices: `/app/enterprise_search/elasticsearch`
 - Dev Tools console: `/app/dev_tools#/console`

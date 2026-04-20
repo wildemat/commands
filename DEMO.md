@@ -325,3 +325,103 @@ commands/
 - **Shareable**: no hardcoded paths, symlink to install, works on any machine
 - **Resilient**: retries, partial success, port cleanup, Docker cleanup
 - **Agent-native**: non-interactive mode, JSON status, curl auth patterns, browser login guidance
+
+---
+
+## Why this exists — native scripts vs. kbn
+
+### The question
+
+Kibana ships with `yarn es`, `yarn start`, `yarn serverless-es`, config
+files for stateful (`kibana.stack.dev.yml`) and serverless
+(`kibana.serverless.dev.yml`), and `--no-optimizer` flags. Why not just
+let Claude run the native scripts directly?
+
+### What you'd need to do natively (5 terminals, manual coordination)
+
+To run both serverless and stateful side-by-side, you need to manually:
+
+```bash
+# Terminal 1: ES Serverless (Docker)
+yarn es serverless --projectType elasticsearch_general_purpose --clean --kill
+
+# Terminal 2: ES Stateful (snapshot, different ports)
+yarn es snapshot --license trial --clean -E http.port=9201 -E transport.port=9301
+
+# Terminal 3: Shared optimizer (otherwise each Kibana runs its own, ~8-16GB RAM)
+node scripts/build_kibana_platform_plugins --watch
+
+# Wait for optimizer to finish building...
+
+# Terminal 4: Kibana Serverless (port 5601, no optimizer)
+yarn serverless-es --server.port=5601 --no-optimizer
+
+# Terminal 5: Kibana Stateful (port 5611, different cookie, no optimizer)
+yarn start --config config/kibana.stack.dev.yml \
+  --server.port=5611 \
+  --xpack.security.cookieName=sid-stack \
+  --no-optimizer
+```
+
+Plus: wait for each ES cluster to be ready before starting its Kibana,
+run `node scripts/eis.js` for EIS after each cluster, set up vault,
+manage Chrome profiles for independent logins, and clean up Docker
+containers / orphaned node processes from previous failed runs.
+
+### What kbn solves that native scripts don't
+
+| Problem | Native scripts | kbn |
+|---------|---------------|-----|
+| **Dual-mode (SLS + Stack)** | Manual 5-terminal setup | One command |
+| **Shared optimizer** | Each Kibana runs its own (~8-16GB total) | Single optimizer in watch mode, both Kibana use `--no-optimizer` |
+| **Startup ordering** | Manually watch for "cluster ready" | Automatic: ES ready → EIS → Kibana |
+| **Auth cookie conflict** | Must remember `--xpack.security.cookieName=sid-stack` | Built in |
+| **Port conflicts** | Must remember port flags for ES (9201/9301) and Kibana (5611) | Built in |
+| **EIS / vault** | Manual vault login + `node scripts/eis.js` per cluster | Pre-check, auto-retry, fallback to no-EIS |
+| **Docker cleanup** | Stale uiam/es containers block next run | Auto-cleanup on start |
+| **Port cleanup** | Orphaned node processes on 5601/5611 | Auto-kill before start |
+| **Process lifecycle** | Ctrl+C one terminal, others keep running | Single Ctrl+C cleans everything |
+| **Restart after code changes** | Kill processes, find PIDs, restart manually | `kbn-ctl restart kbnsls` |
+| **Partial failure** | Serverless fails, you lose stateful too (manual) | Stateful stays up, serverless retries |
+| **Status at a glance** | `lsof`, `docker ps`, check each terminal | `kbn-ctl status` |
+| **Agent-friendly** | Interactive prompts, no structured output | Non-interactive mode, JSON status, `kbn-ctl` CLI |
+
+### What could be simplified
+
+- **Bootstrap on every start**: Currently runs `yarn kbn bootstrap` every
+  time. Could be `--clean` only since devs already run it manually. But
+  it's a no-op when nothing changed (~2s with cache).
+- **Chrome profiles**: Nice-to-have but not essential. Most devs could
+  just use incognito. Kept because agents need programmatic auth per
+  instance.
+- **tmux viewer**: Convenient but optional (`--quiet` skips it). Devs
+  with their own terminal setup can ignore it.
+
+### What an agent would need without kbn
+
+Without `kbn`, the Claude skill would need to:
+
+1. Detect nvm, switch node version, verify it stuck
+2. Run 5 commands in correct order with correct flags
+3. Know the port assignments (9200 vs 9201, 5601 vs 5611)
+4. Know about the cookie name conflict
+5. Know to run optimizer separately and use `--no-optimizer`
+6. Watch log files for readiness patterns before starting Kibana
+7. Handle vault login for EIS
+8. Clean up stale Docker containers
+9. Kill orphaned processes on ports
+10. Manage all PIDs for cleanup
+11. Handle partial failures independently
+
+That's the entire `kbn` script reimplemented as skill instructions. The
+skill would be 3-4x larger and more fragile. `kbn` + `kbn-ctl` abstract
+the orchestration so the skill only needs to know: start, status, logs,
+restart, stop.
+
+### Verdict
+
+**Not bloat.** The native scripts handle individual components. `kbn`
+handles the composition — running both modes side-by-side with a shared
+optimizer, coordinated startup, and clean lifecycle management. This is
+the part that's genuinely hard to do manually and even harder to teach
+an agent to do ad-hoc.
