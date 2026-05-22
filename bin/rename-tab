@@ -1,0 +1,4 @@
+#!/bin/bash
+# Rename the current iTerm2 tab to the given name.
+# Usage: rename-tab <name>
+printf "\033]0;%s\007" "$*"
