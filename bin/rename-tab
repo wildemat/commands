@@ -1,4 +1,13 @@
 #!/bin/bash
-# Rename the current iTerm2 tab to the given name.
+# Rename the current iTerm2 tab and lock it so the auto-title precmd doesn't override it.
 # Usage: rename-tab <name>
-printf "\033]0;%s\007" "$*"
+#        rename-tab         (no args = unlock, revert to directory auto-title)
+LOCKFILE="${HOME}/.iterm_tab_locked_${ITERM_SESSION_ID:-default}"
+
+if [[ -z "$1" ]]; then
+  rm -f "$LOCKFILE"
+  printf "\033]0;%s\007" "$(basename "$PWD")"
+else
+  touch "$LOCKFILE"
+  printf "\033]0;%s\007" "$*"
+fi
