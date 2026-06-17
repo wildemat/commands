@@ -1,4 +1,5 @@
 _created_at: 2026-02-18_
+_edited: 2026-06-17_
 
 # Agent Configuration Home
 
@@ -11,6 +12,13 @@ When an agent is pointed to this directory, it should treat the contents here as
 ---
 
 ## Source Map
+
+### `/` (root)
+
+| File | Description |
+| --- | --- |
+| `ARCHITECTURE.md` | Full infrastructure diagram for Claude agent stacks — skill discovery, memory, orchestration, and MCP integrations across coding and production workflows. |
+| `learnings.md` | Hard-won patterns for context window management and agent handoff. |
 
 ### `/prompts/`
 

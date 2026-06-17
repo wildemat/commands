@@ -1,0 +1,41 @@
+{
+  "version": 3,
+  "skills": {
+    "notion-cli": {
+      "source": "makenotion/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/makenotion/skills.git",
+      "skillPath": "skills/notion-cli/SKILL.md",
+      "skillFolderHash": "4360360f674f12699a66fffa1ab80174abbca93b",
+      "installedAt": "2026-05-26T20:25:58.346Z",
+      "updatedAt": "2026-05-26T20:25:58.346Z"
+    },
+    "find-skills": {
+      "source": "vercel-labs/skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/skills.git",
+      "skillPath": "skills/find-skills/SKILL.md",
+      "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
+      "installedAt": "2026-05-26T20:26:18.427Z",
+      "updatedAt": "2026-05-26T20:26:18.427Z"
+    }
+  },
+  "dismissed": {
+    "findSkillsPrompt": true
+  },
+  "lastSelectedAgents": [
+    "amp",
+    "antigravity",
+    "cline",
+    "codex",
+    "cursor",
+    "deepagents",
+    "dexto",
+    "firebender",
+    "gemini-cli",
+    "github-copilot",
+    "kimi-cli",
+    "opencode",
+    "warp"
+  ]
+}
