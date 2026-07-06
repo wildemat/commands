@@ -1,5 +1,6 @@
 _created_at: 2026-02-18_
 _edited: 2026-06-17_
+_edited: 2026-07-03_
 
 # Agent Configuration Home
 
@@ -19,6 +20,7 @@ When an agent is pointed to this directory, it should treat the contents here as
 | --- | --- |
 | `ARCHITECTURE.md` | Full infrastructure diagram for Claude agent stacks — skill discovery, memory, orchestration, and MCP integrations across coding and production workflows. |
 | `learnings.md` | Hard-won patterns for context window management and agent handoff. |
+| `STYLE.md` | Writing standards for code comments and agent responses. Read at the start of every session and apply to all code and output. |
 
 ### `/prompts/`
 
