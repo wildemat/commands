@@ -85,6 +85,12 @@ SVGS=()
 while IFS= read -r svg; do SVGS+=("$svg"); done < <(find "$WORK" -maxdepth 1 -name "page*.svg" | sort)
 [[ ${#SVGS[@]} -eq 0 ]] && die "verovio produced no SVG pages for: $INPUT"
 
+# Music glyphs inside text runs (metronome marks) are emitted as <tspan> in the
+# Leipzig font, supplied only as a base64 WOFF2 @font-face. librsvg ignores
+# that, substitutes a text font, and rasterizes a garbage glyph at the glyph's
+# point size — a blot large enough to bury the page. Drop the glyph instead.
+sed -i '' 's|<tspan[^>]*font-family="Leipzig"[^>]*>[^<]*</tspan>||g' "${SVGS[@]}"
+
 echo "→ PDF"
 rsvg-convert -f pdf -o "$OUT_PDF" "${SVGS[@]}"
 
