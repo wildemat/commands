@@ -1,0 +1,91 @@
+#!/bin/bash
+# Pipeline: PDF sheet music -> OMR -> fingering annotation -> PDF
+# Usage: piano-fingering <input.pdf> <output-dir>
+set -euo pipefail
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+[[ $# -ne 2 ]] && { echo "Usage: piano-fingering <input.pdf> <output-dir>"; exit 1; }
+
+INPUT="$(realpath "$1")"
+OUTPUT_DIR="$(realpath "$2")"
+
+[[ ! -f "$INPUT" ]] && die "not a file: $INPUT"
+[[ "${INPUT##*.}" != "pdf" ]] && die "expected a .pdf file, got: $INPUT"
+
+BASENAME=$(basename "$INPUT" .pdf)
+OUT_PDF="${OUTPUT_DIR}/${BASENAME}-fingering.pdf"
+
+[[ -f "$OUT_PDF" ]] && { echo "SKIP (exists): $OUT_PDF"; exit 0; }
+
+mkdir -p "$OUTPUT_DIR"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+# Audiveris renders PDFs at a fixed DPI and discards any sheet exceeding 20 MP,
+# so oversized page boxes lose every page. Scale DPI to the page width to land
+# near letter-at-300dpi, which leaves normal letter/A4 scores untouched.
+DPI_OPT=""
+if command -v pdfinfo >/dev/null 2>&1; then
+    PTS=$(pdfinfo "$INPUT" 2>/dev/null | awk '/^Page size:/ {print $3; exit}')
+    if [[ -n "$PTS" ]]; then
+        DPI=$(awk -v w="$PTS" 'BEGIN {d = int(183600 / w + 0.5)
+                                      if (d < 50) d = 50
+                                      if (d > 400) d = 400
+                                      print d}')
+        DPI_OPT="-constant org.audiveris.omr.image.ImageLoading.pdfResolution=$DPI"
+    fi
+fi
+
+echo "→ OMR          $BASENAME${DPI_OPT:+ (${DPI:-} dpi)}"
+audiveris -batch -export $DPI_OPT -output "$WORK" -- "$INPUT" \
+    >"$WORK/omr1.log" 2>&1 || true   # non-zero on warnings; check output instead
+
+MXL=$(find "$WORK" -name "*.mxl" | head -1)
+if [[ -z "$MXL" ]]; then
+    # Any sheet Audiveris rejects (cover, blank leaf, text page) aborts the
+    # whole-book export, so retry with just the sheets that survived.
+    PAGES=$(pdfinfo "$INPUT" 2>/dev/null | awk '/^Pages:/ {print $2}')
+    BAD=$(grep -E 'flagged as invalid|Sheet removed|Error processing stub' \
+              "$WORK/omr1.log" 2>/dev/null |
+          grep -oE '#[0-9]+\]' | tr -cd '0-9\n' | sort -un | tr '\n' ' ')
+    GOOD=""
+    if [[ -n "$PAGES" && -n "$BAD" ]]; then
+        GOOD=$(awk -v n="$PAGES" -v bad="$BAD" 'BEGIN {
+            split(bad, b, " ")
+            for (i in b) if (b[i] != "") skip[b[i]] = 1
+            for (p = 1; p <= n; p++)
+                if (!(p in skip)) printf "%s%d", (out++ ? " " : ""), p }')
+    fi
+    if [[ -n "$GOOD" ]]; then
+        echo "→ OMR retry    sheets $GOOD (dropped $BAD)"
+    else
+        GOOD="2-99"
+        echo "→ OMR retry    skip page 1"
+    fi
+    rm -rf "${WORK:?}"/*
+    audiveris -batch -export $DPI_OPT -sheets $GOOD -output "$WORK" -- "$INPUT" \
+        >/dev/null 2>&1 || true
+    MXL=$(find "$WORK" -name "*.mxl" | head -1)
+fi
+[[ -z "$MXL" ]] && die "Audiveris produced no .mxl for: $INPUT"
+
+echo "→ Fingering"
+(cd "$WORK" && pianoplayer "$MXL") >/dev/null 2>&1
+
+[[ ! -f "$WORK/output.xml" ]] && die "pianoplayer produced no output.xml for: $INPUT"
+
+echo "→ Rendering"
+verovio --all-pages -t svg -o "$WORK/page.svg" "$WORK/output.xml" \
+    >/dev/null 2>&1
+
+SVGS=()
+# verovio suffixes multi-page renders (page_001.svg) but writes a single-page
+# score to the bare output name, so both forms have to be collected.
+while IFS= read -r svg; do SVGS+=("$svg"); done < <(find "$WORK" -maxdepth 1 -name "page*.svg" | sort)
+[[ ${#SVGS[@]} -eq 0 ]] && die "verovio produced no SVG pages for: $INPUT"
+
+echo "→ PDF"
+rsvg-convert -f pdf -o "$OUT_PDF" "${SVGS[@]}"
+
+echo "OK $OUT_PDF"

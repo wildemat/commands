@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -u
+
+# Batch-convert every PDF under "Sheet music" into a fingering-annotated PDF,
+# mirroring the source directory structure into the _Fingering output folder.
+# Already-processed files are skipped, so this is safe to re-run and resume.
+
+# Pin PATH so the pipeline tools resolve under cron/launchd's bare environment.
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$HOME/Github/commands/bin:$PYENV_ROOT/shims:$PYENV_ROOT/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+# Headless keeps Audiveris's JVM from creating an AWT window and stealing focus.
+export JAVA_TOOL_OPTIONS="-Djava.awt.headless=true"
+
+# The Google Drive mount embeds the account name, so discover it rather than
+# hard-coding it. PIANO_FINGERING_SRC overrides for a non-Drive library.
+SRC="${PIANO_FINGERING_SRC:-}"
+if [ -z "$SRC" ]; then
+  for d in "$HOME"/Library/CloudStorage/GoogleDrive-*/"My Drive/Sheet music"; do
+    [ -d "$d" ] && SRC="$d" && break
+  done
+fi
+if [ -z "$SRC" ] || [ ! -d "$SRC" ]; then
+  echo "ERROR: no sheet-music library found; set PIANO_FINGERING_SRC" >&2
+  exit 1
+fi
+OUT="$SRC/_Fingering"
+LOG="$OUT/fingering-run.log"
+MANIFEST="$HOME/.cache/piano-fingering/manifest.txt"
+
+# Under launchd, TCC denies directory enumeration of the Google Drive
+# CloudStorage tree (individual file open still works), so a live find returns
+# nothing. Refresh the manifest when enumeration works; otherwise reuse it.
+mkdir -p "$(dirname "$MANIFEST")"
+live="$(find "$SRC" -type d -name '_Fingering' -prune -o -type f -iname '*.pdf' -print 2>/dev/null | sort)"
+if [ -n "$live" ]; then
+  printf '%s\n' "$live" > "$MANIFEST"
+fi
+
+if [ ! -s "$MANIFEST" ]; then
+  echo "ERROR: no source manifest at $MANIFEST and cannot enumerate $SRC" >&2
+  exit 1
+fi
+
+total="$(wc -l < "$MANIFEST" | tr -d ' ')"
+mkdir -p "$OUT"
+ok=0; skip=0; err=0; n=0
+echo "=== run started $(date '+%Y-%m-%d %H:%M:%S') — $total files ===" | tee -a "$LOG"
+
+while IFS= read -r f; do
+  [ -n "$f" ] || continue
+  n=$((n+1))
+  rel="${f#"$SRC"/}"
+  reldir="$(dirname "$rel")"
+  if [ "$reldir" = "." ]; then
+    dest="$OUT"
+  else
+    dest="$OUT/$reldir"
+  fi
+  mkdir -p "$dest"
+  echo "[$n/$total] START: $rel" | tee -a "$LOG"
+  result="$(piano-fingering "$f" "$dest" 2>&1)"
+  echo "$result" | tee -a "$LOG"
+  # Progress lines precede the verdict, so only the final line classifies the run.
+  case "$(printf '%s\n' "$result" | tail -1)" in
+    OK*)   ok=$((ok+1)) ;;
+    SKIP*) skip=$((skip+1)) ;;
+    *)     err=$((err+1)) ;;
+  esac
+done < "$MANIFEST"
+
+echo "=== SUMMARY: $ok OK, $skip skipped, $err failed (of $n) ===" | tee -a "$LOG"

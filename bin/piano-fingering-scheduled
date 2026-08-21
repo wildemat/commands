@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# One-shot wrapper launchd invokes at the scheduled time: run the batch, then
+# tear down the LaunchAgent so it never fires again.
+set -u
+
+LABEL='com.wildmat.piano-fingering'
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/.cache/piano-fingering/scheduled.out"
+
+mkdir -p "$(dirname "$LOG")"
+"$HOME/Github/commands/bin/piano-fingering-batch" >> "$LOG" 2>&1
+
+rm -f "$PLIST"
+launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
