@@ -26,6 +26,12 @@ Dual-mode Kibana dev launcher: serverless (:5601) + stateful (:5611).
 Both scripts detect and activate the correct node version automatically
 (supports nvm, fnm, volta, mise, asdf) — no manual setup needed.
 
+Kibana installs dependencies with **pnpm** (migrated from Yarn in
+[#284611](https://github.com/elastic/kibana/pull/284611)). `kbn-dev` shells out
+to `pnpm run kbn bootstrap`, `pnpm run es`, and `pnpm run start`/`serverless-es`,
+and exits early if `pnpm` isn't on PATH. Since pnpm installs per node version,
+node activation is what puts the right pnpm on PATH.
+
 **All commands must run from the kibana repo root.** If you're not there,
 `cd` to it first. Check with: `grep -q '"name": "kibana"' package.json 2>/dev/null && echo OK || echo "NOT in kibana root"`
 
@@ -53,7 +59,7 @@ Components: `essls`, `esstack`, `optimizer`, `kbnsls`, `kbnstack`, `main`, `all`
 Check status first. If already running, tell the user. If not:
 
 1. Say: "Spinning up Kibana, standby... (run /kbn-dev-status to check)"
-2. Run `kbn-dev --quiet` in background. To pin the stateful ES version, add `--es-version <ver>` using a full patch version like `9.3.3` (script strips a trailing `-SNAPSHOT` if present); only affects stack ES via `yarn es snapshot`, not serverless.
+2. Run `kbn-dev --quiet` in background. To pin the stateful ES version, add `--es-version <ver>` using a full patch version like `9.3.3` (script strips a trailing `-SNAPSHOT` if present); only affects stack ES via `pnpm run es snapshot`, not serverless.
 3. Poll silently:
    ```bash
    for i in $(seq 1 40); do

@@ -18,6 +18,15 @@
       "skillFolderHash": "3013fdeb8a11b10b1eb795ec3ae8bfca38f7c26d",
       "installedAt": "2026-05-26T20:26:18.427Z",
       "updatedAt": "2026-05-26T20:26:18.427Z"
+    },
+    "avoid-ai-writing": {
+      "source": "conorbronsdon/avoid-ai-writing",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/conorbronsdon/avoid-ai-writing.git",
+      "skillPath": "SKILL.md",
+      "skillFolderHash": "8ed577651c63207ee38fd6b362714feae6ed141c",
+      "installedAt": "2026-09-10T19:16:30.538Z",
+      "updatedAt": "2026-09-10T19:19:05.129Z"
     }
   },
   "dismissed": {
@@ -25,17 +34,17 @@
   },
   "lastSelectedAgents": [
     "amp",
-    "antigravity",
     "cline",
     "codex",
     "cursor",
-    "deepagents",
-    "dexto",
-    "firebender",
+    "droid",
     "gemini-cli",
     "github-copilot",
-    "kimi-cli",
+    "kilo",
+    "kimi-code-cli",
     "opencode",
-    "warp"
+    "warp",
+    "zed",
+    "claude-code"
   ]
 }
