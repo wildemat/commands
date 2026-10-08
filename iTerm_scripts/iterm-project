@@ -1,0 +1,4 @@
+#!/bin/sh
+# Usage: iterm-project <project>
+dir="$(cd "$(dirname "$(readlink "$0" || echo "$0")")" && pwd)"
+exec "$dir/.venv/bin/python" "$dir/launch.py" "$@"
